@@ -1,7 +1,9 @@
 # Matthew Merrill <mattmerr.com>
 # HackDavis 2019
 import requests as req
-from websocket import create_connection
+import websocket
+
+from google.cloud import spanner
 
 ROOT_URL = 'https://ucd-pi-iis.ou.ad3.ucdavis.edu/piwebapi'
 
@@ -34,14 +36,49 @@ def with_display_name(building):
         return (building, building['Name'])
 
 
+def with_electricity_webid(building_name_pair):
+    try:
+        building, name = building_name_pair
+        elements = send_request(building['Links']['Elements'])
+        electricity_values = send_request(get_named_item(elements, 'Electricity')['Links']['Value'])
+        electricity_demand = get_named_item(electricity_values, 'Demand')
+        return (electricity_demand['WebId'], name)
+    except:
+        return None
+
+
 def open_channel(tups):
-    names = { tup[0]['WebId']: tup[1] for tup in tups }
-    socket = 
+    names = { tup[0]: tup[1] for tup in tups }
+    #tups = tups[0:8]
+    url = ROOT_URL + '/streamsets/channel?' + (''.join([ '&WebId=' + tup[0] for tup in tups]))[1:]
+    url = url.replace('https', 'wss')
+    print(url)
+    socket = websocket.create_connection(url)
+    while True:
+        yield socket.recv()
 
 
 if __name__ == '__main__':
     buildings = loadBuildings(ROOT_URL)
     building_name_tups = [with_display_name(building) for building in buildings]
-    open_channel(building_name_tups)
+    elecweb_name_tups = (with_electricity_webid(pair) for pair in building_name_tups)
+    elecweb_name_tups = [pair for pair in elecweb_name_tups if pair is not None]
+
+    spanner_client = spanner.Client()
+    spanner_instance_id = 'hackdavisdatadump'
+    spanner_instance = spanner_client.instance(spanner_instance_id)
+    spanner_database_id = 'datadump'
+    spanner_database = instance.database(database_id)
+
+    for data in open_channel(elecweb_name_tups):
+        with spanner_database.batch() as batch:
+            batch.insert(
+                    table='electricity',
+                    columns = ('BuildingName', 'Timestamp', 'Value'),
+                    values = [
+                        data
+                        ])
+        print(data)
+
 
 
