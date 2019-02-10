@@ -2,6 +2,7 @@
 # HackDavis 2019
 import requests as req
 import websocket
+import json
 
 from google.cloud import spanner
 
@@ -52,10 +53,16 @@ def open_channel(tups):
     #tups = tups[0:8]
     url = ROOT_URL + '/streamsets/channel?' + (''.join([ '&WebId=' + tup[0] for tup in tups]))[1:]
     url = url.replace('https', 'wss')
-    print(url)
+    #print(url)
     socket = websocket.create_connection(url)
     while True:
-        yield socket.recv()
+        data = json.loads(socket.recv())
+        #print(data)
+        for item in data['Items']:
+            webId = item['WebId']
+            tstmp = item['Items'][0]['Timestamp']
+            value = item['Items'][0]['Value']
+            yield (names[webId], tstmp, value)
 
 
 if __name__ == '__main__':
@@ -64,21 +71,25 @@ if __name__ == '__main__':
     elecweb_name_tups = (with_electricity_webid(pair) for pair in building_name_tups)
     elecweb_name_tups = [pair for pair in elecweb_name_tups if pair is not None]
 
+    print('Loaded!')
     spanner_client = spanner.Client()
     spanner_instance_id = 'hackdavisdatadump'
     spanner_instance = spanner_client.instance(spanner_instance_id)
     spanner_database_id = 'datadump'
-    spanner_database = instance.database(database_id)
+    spanner_database = spanner_instance.database(spanner_database_id)
 
     for data in open_channel(elecweb_name_tups):
-        with spanner_database.batch() as batch:
-            batch.insert(
-                    table='electricity',
-                    columns = ('BuildingName', 'Timestamp', 'Value'),
-                    values = [
-                        data
-                        ])
-        print(data)
+        try: 
+            with spanner_database.batch() as batch:
+                batch.insert(
+                        table='electricity',
+                        columns = ('BuildingName', 'Timestamp', 'Value'),
+                        values = [
+                            data
+                            ])
+            print(data)
+        except:
+            pass
 
 
 
